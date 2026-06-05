@@ -314,8 +314,100 @@ class ExcelStore:
             total,paid,bal,status,"",d["due"],d["notes"]])
         self.update_dashboard(); return inv_no
 
+    @staticmethod
+    def _payment_status(total,paid):
+        bal=round(money(total)-money(paid),2)
+        if paid<=0:
+            return "Unpaid"
+        return "Paid" if bal<=0 else "Partial"
+
+    def _sync_invoice_payment_state(self,wb,inv_no):
+        inv_no=str(inv_no or "")
+        if not inv_no:
+            return
+        iw=wb["Invoices"]; ih=[c.value for c in iw[1]]
+        pw=wb["Payments"]; ph=[c.value for c in pw[1]]
+        required=("Invoice No","Paid Amount","Balance","Total Amount","Payment Status","Payment Mode")
+        if any(h not in ih for h in required):
+            return
+        if any(h not in ph for h in ("Invoice No","Paid Amount","Payment Mode")):
+            return
+        inv_row=None
+        inv_col=ih.index("Invoice No")+1
+        for r in range(2,iw.max_row+1):
+            if str(iw.cell(r,inv_col).value)==inv_no:
+                inv_row=r
+                break
+        if not inv_row:
+            return
+
+        total=money(iw.cell(inv_row,ih.index("Total Amount")+1).value)
+        running=0.0; last_mode=""
+        p_inv_col=ph.index("Invoice No")+1
+        p_paid_col=ph.index("Paid Amount")+1
+        p_mode_col=ph.index("Payment Mode")+1
+        for r in range(2,pw.max_row+1):
+            if str(pw.cell(r,p_inv_col).value)!=inv_no:
+                continue
+            receipt_paid=money(pw.cell(r,p_paid_col).value)
+            running=round(running+receipt_paid,2)
+            balance=round(total-running,2)
+            mode=str(pw.cell(r,p_mode_col).value or "")
+            if mode:
+                last_mode=mode
+            updates={
+                "Total Fees":total,
+                "Fees Paid":running,
+                "Balance Fees":balance,
+                "Receipt Paid":receipt_paid,
+                "Payment Status":self._payment_status(total,running),
+            }
+            for col,val in updates.items():
+                if col in ph:
+                    pw.cell(r,ph.index(col)+1).value=val
+
+        balance=round(total-running,2)
+        iw.cell(inv_row,ih.index("Paid Amount")+1).value=running
+        iw.cell(inv_row,ih.index("Balance")+1).value=balance
+        iw.cell(inv_row,ih.index("Payment Status")+1).value=self._payment_status(total,running)
+        iw.cell(inv_row,ih.index("Payment Mode")+1).value=last_mode if running>0 else ""
+
+    def _delete_finance_by_reference(self,wb,reference):
+        reference=str(reference or "")
+        if not reference or "Finance" not in wb.sheetnames:
+            return
+        ws=wb["Finance"]; hdrs=[c.value for c in ws[1]]
+        if "Reference" not in hdrs:
+            return
+        rc=hdrs.index("Reference")+1
+        for r in range(ws.max_row,1,-1):
+            if str(ws.cell(r,rc).value or "")==reference:
+                ws.delete_rows(r)
+
     def delete_invoice(self,inv_no):
-        self._delete("Invoices","Invoice No",inv_no); self.update_dashboard()
+        inv_no=str(inv_no or "")
+        wb=self._wb()
+        if "Payments" in wb.sheetnames:
+            pw=wb["Payments"]; ph=[c.value for c in pw[1]]
+            if "Invoice No" in ph:
+                ic=ph.index("Invoice No")+1
+                rc=ph.index("Receipt No")+1 if "Receipt No" in ph else None
+                for r in range(pw.max_row,1,-1):
+                    if str(pw.cell(r,ic).value or "")==inv_no:
+                        if rc:
+                            self._delete_finance_by_reference(wb,pw.cell(r,rc).value)
+                        pw.delete_rows(r)
+        ws=wb["Invoices"]; hdrs=[c.value for c in ws[1]]
+        ic=hdrs.index("Invoice No")+1
+        for r in range(2,ws.max_row+1):
+            if str(ws.cell(r,ic).value)==inv_no:
+                ws.delete_rows(r)
+                break
+        for sheet in ("Invoices","Payments","Finance"):
+            if sheet in wb.sheetnames:
+                self._sh(wb[sheet])
+        safe_save(wb,self.path)
+        self.update_dashboard()
 
     def get_invoice(self,inv_no):
         for r in self.rows("Invoices"):
@@ -365,7 +457,27 @@ class ExcelStore:
         return rno
 
     def delete_payment(self,rno):
-        self._delete("Payments","Receipt No",rno); self.update_dashboard()
+        rno=str(rno or "")
+        wb=self._wb()
+        pw=wb["Payments"]; ph=[c.value for c in pw[1]]
+        if "Receipt No" not in ph:
+            return
+        rc=ph.index("Receipt No")+1
+        inv_no=""
+        for r in range(2,pw.max_row+1):
+            if str(pw.cell(r,rc).value)==rno:
+                if "Invoice No" in ph:
+                    inv_no=str(pw.cell(r,ph.index("Invoice No")+1).value or "")
+                pw.delete_rows(r)
+                break
+        self._delete_finance_by_reference(wb,rno)
+        if inv_no:
+            self._sync_invoice_payment_state(wb,inv_no)
+        for sheet in ("Invoices","Payments","Finance"):
+            if sheet in wb.sheetnames:
+                self._sh(wb[sheet])
+        safe_save(wb,self.path)
+        self.update_dashboard()
 
     def get_payment(self,rno):
         for r in self.rows("Payments"):
@@ -1239,7 +1351,7 @@ class BillingApp(tk.Tk):
         sel=self.p_tree.selection()
         if not sel: return messagebox.showwarning("Select","Select a payment to delete")
         rno=self.p_tree.item(sel[0],"values")[0]
-        if messagebox.askyesno("Confirm",f"Delete receipt {rno}?\nInvoice balance will NOT auto-adjust."):
+        if messagebox.askyesno("Confirm",f"Delete receipt {rno}?\nInvoice balance and finance income will auto-adjust."):
             try: self.store.delete_payment(rno); self.refresh_all()
             except PermissionError as e: self._pe(str(e))
 
