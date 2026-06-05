@@ -1,0 +1,22 @@
+# Generated app output
+build/
+dist/
+*.spec
+
+# Runtime/generated data
+invoices/
+*.xlsx
+*.xls
+*.csv
+*.db
+*.sqlite
+*.sqlite3
+
+# Python cache files
+__pycache__/
+*.py[cod]
+
+# Local environment/config
+.env
+.venv/
+venv/
