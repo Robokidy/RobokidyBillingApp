@@ -1,6 +1,8 @@
 # Generated app output
 build/
+build_onefile/
 dist/
+release/
 *.spec
 
 # Runtime/generated data

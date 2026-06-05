@@ -6,12 +6,14 @@ Robokidy Innovative Centre - Billing Software v5.0
 - Logo fix for .exe: embedded as base64 from exe folder
 """
 from __future__ import annotations
-import sys, time, webbrowser
+import base64, io, sys, time, urllib.request, webbrowser
 from datetime import datetime
+from html import escape
 from pathlib import Path
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, simpledialog
 
+from PIL import Image, ImageTk
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
@@ -31,6 +33,8 @@ def _base_dir() -> Path:
 BASE_DIR    = _base_dir()
 DATA_FILE   = BASE_DIR / "robokidy_billing_data.xlsx"
 INVOICE_DIR = BASE_DIR / "invoices"
+LOGO_URL    = "https://podu.pics/eR_8Q0TGcG"
+LOGO_FILE   = BASE_DIR / "robokidy_logo.png"
 
 COURSES = [
     "Python","Lego","Scratch","Robotics","Arduino","IoT","AI/ML",
@@ -77,6 +81,32 @@ def safe_save(wb, path:Path):
             if i<2: time.sleep(0.5)
             else: raise PermissionError(
                 f"File is open in Excel. Please close:\n{path.resolve()}\nThen try again.")
+
+def logo_path() -> Path | None:
+    bundled = Path(getattr(sys, "_MEIPASS", BASE_DIR)) / LOGO_FILE.name
+    for candidate in (LOGO_FILE, bundled):
+        if candidate.exists():
+            return candidate
+    try:
+        req = urllib.request.Request(LOGO_URL, headers={"User-Agent":"Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=12) as r:
+            raw = r.read()
+        img = Image.open(io.BytesIO(raw))
+        img.thumbnail((900, 900))
+        img.save(LOGO_FILE, "PNG")
+        return LOGO_FILE
+    except Exception:
+        return None
+
+def logo_data_uri() -> str:
+    path = logo_path()
+    if not path:
+        return LOGO_URL
+    try:
+        data = base64.b64encode(path.read_bytes()).decode("ascii")
+        return f"data:image/png;base64,{data}"
+    except Exception:
+        return LOGO_URL
 
 # ═══════════════════════════════════════════════════════════════════════════════
 class ExcelStore:
@@ -376,7 +406,9 @@ class ExcelStore:
 
 # ── HTML Invoice ───────────────────────────────────────────────────────────────
 def make_html(company,inv,receipt_no=None,payment=None):
-    logo_html=f'<div style="font-size:24px;font-weight:900;color:#fff;">{company.get("Company Name","Robokidy")}</div>'
+    logo_html=(f'<img src="{escape(logo_data_uri(), quote=True)}" alt="Robokidy logo" '
+               f'style="width:168px;height:58px;object-fit:contain;background:#fff;'
+               f'border-radius:8px;padding:6px;box-shadow:0 4px 14px rgba(0,0,0,.16)">')
     is_r=receipt_no is not None
     badge="RECEIPT" if is_r else "INVOICE"
     bcol=SECONDARY if is_r else "ffffff"
@@ -425,10 +457,9 @@ table{{width:100%;border-collapse:collapse;border:1.5px solid #dde3f8;border-rad
 </style></head><body>
 <div class="pg">
 <div class="hd">
-  <div style="display:flex;align-items:center;gap:16px">
+  <div style="display:flex;align-items:center;gap:18px">
     {logo_html}
     <div>
-      <div style="color:#fff;font-size:18px;font-weight:700">{company.get('Company Name','Robokidy')}</div>
       <div style="color:#a8b8ff;font-size:11.5px">{company.get('Address','')}</div>
       <div style="color:#a8b8ff;font-size:11.5px">{company.get('Phone','')} | {company.get('Email','')}</div>
       {gline}
@@ -438,8 +469,8 @@ table{{width:100%;border-collapse:collapse;border:1.5px solid #dde3f8;border-rad
 </div>
 <div class="body">
   <div class="pb">
-    <button class="btn bp" onclick="window.print()">🖨️ Print / Save PDF</button>
-    <button class="btn bs" onclick="window.close()">✕ Close</button>
+    <button class="btn bp" onclick="window.print()">Print / Save PDF</button>
+    <button class="btn bs" onclick="window.close()">Close</button>
   </div>
   <div class="grid">
     <div class="box"><h4>{'Receipt' if is_r else 'Invoice'} Details</h4>
@@ -626,7 +657,7 @@ class FinanceDlg(Dialog):
 class BillingApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Robokidy Innovative Centre — Billing Software v5.0")
+        self.title("Billing Software v5.0")
         self.geometry("1260x820"); self.minsize(980,640)
         self.store=ExcelStore(); self.configure(bg=BG_LIGHT)
         INVOICE_DIR.mkdir(exist_ok=True)
@@ -637,10 +668,11 @@ class BillingApp(tk.Tk):
     # ── Shell ──────────────────────────────────────────────────────────────────
     def _build(self):
         tb=tk.Frame(self,bg=f"#{PRIMARY}",height=56); tb.pack(fill="x"); tb.pack_propagate(False)
-        tk.Label(tb,text="  🤖  ROBOKIDY INNOVATIVE CENTRE",bg=f"#{PRIMARY}",fg="white",
-                 font=("Segoe UI",15,"bold")).pack(side="left",padx=14)
+        self._logo_img=self._load_logo_image((150,42))
+        if self._logo_img:
+            tk.Label(tb,image=self._logo_img,bg=f"#{PRIMARY}").pack(side="left",padx=(14,0))
         tk.Label(tb,text="Billing v5.0",bg=f"#{PRIMARY}",fg=f"#{SECONDARY}",
-                 font=("Segoe UI",10)).pack(side="left")
+                 font=("Segoe UI",11,"bold")).pack(side="left",padx=14)
         self._clk=tk.Label(tb,bg=f"#{PRIMARY}",fg="#aabbff",font=("Segoe UI",10))
         self._clk.pack(side="right",padx=16); self._tick()
         s=ttk.Style(self); s.theme_use("clam")
@@ -656,6 +688,20 @@ class BillingApp(tk.Tk):
         self.nb=ttk.Notebook(self); self.nb.pack(fill="both",expand=True,padx=10,pady=8)
         self._t_dash(); self._t_stu(); self._t_inv(); self._t_pay()
         self._t_plans(); self._t_finance(); self._t_reports()
+
+    def _load_logo_image(self,size):
+        path=logo_path()
+        if not path:
+            return None
+        try:
+            img=Image.open(path).convert("RGBA")
+            img.thumbnail(size)
+            canvas=Image.new("RGBA",size,(255,255,255,0))
+            x=(size[0]-img.width)//2; y=(size[1]-img.height)//2
+            canvas.paste(img,(x,y),img)
+            return ImageTk.PhotoImage(canvas)
+        except Exception:
+            return None
 
     def _tick(self):
         self._clk.config(text=datetime.now().strftime("  %d %b %Y   %I:%M:%S %p  "))
