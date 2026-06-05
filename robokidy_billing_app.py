@@ -1,12 +1,12 @@
 """
-Robokidy Innovative Centre - Billing Software v4.0
+Robokidy Innovative Centre - Billing Software v5.0
 - Edit/Delete: Students, Invoices, Payments, Course Plans, Finance entries
 - Course Plans with editable fees (incl. Yearly All-Courses)
 - Finance Tracker: Income & Expenses with categories, monthly summary
 - Logo fix for .exe: embedded as base64 from exe folder
 """
 from __future__ import annotations
-import base64, os, sys, time, webbrowser
+import sys, time, webbrowser
 from datetime import datetime
 from pathlib import Path
 import tkinter as tk
@@ -31,22 +31,21 @@ def _base_dir() -> Path:
 BASE_DIR    = _base_dir()
 DATA_FILE   = BASE_DIR / "robokidy_billing_data.xlsx"
 INVOICE_DIR = BASE_DIR / "invoices"
-LOGO_PATH   = BASE_DIR / "logo.jpeg"
 
 COURSES = [
-    "Python","Scratch","Robotics","Arduino","IoT","AI/ML",
+    "Python","Lego","Scratch","Robotics","Arduino","IoT","AI/ML",
     "Web Dev","App Dev","3D Printing","Drone Tech","Electronics",
     "Yearly All-Courses","Other"
 ]
 COURSE_CODES = {
-    "Python":"PY","Scratch":"SC","Robotics":"RB","Arduino":"AR","IoT":"IT",
+    "Python":"PY","Lego":"LG","Scratch":"SC","Robotics":"RB","Arduino":"AR","IoT":"IT",
     "AI/ML":"AI","Web Dev":"WD","App Dev":"AD","3D Printing":"3D",
     "Drone Tech":"DR","Electronics":"EL","Yearly All-Courses":"YR","Other":"OT"
 }
 LEVELS      = ["Level 1","Level 2","Level 3","Level 4","Advanced","Beginner","All Levels"]
 BATCHES     = ["Morning","Afternoon","Evening","Weekend","Online"]
 PAY_MODES   = ["Cash","UPI","Bank Transfer","Cheque","Card","Online"]
-DURATIONS   = ["Monthly","Quarterly","Half-Yearly","Yearly","One-Time"]
+DURATIONS   = [f"{i} Month" for i in range(1,13)]
 INC_CATS    = ["Course Fee","Registration Fee","Material Fee","Workshop","Donation","Other Income"]
 EXP_CATS    = ["Rent","Electricity","Salaries","Equipment","Materials","Marketing",
                "Internet","Maintenance","Software","Miscellaneous"]
@@ -60,8 +59,10 @@ INVOICE_HEADERS = ["Invoice No","Date","Student ID","Student Name","Course","Lev
                    "Tax Type","Tax Value","Tax Amount","Total Amount",
                    "Paid Amount","Balance","Payment Status","Payment Mode","Due Date","Notes"]
 PAYMENT_HEADERS = ["Receipt No","Date","Invoice No","Student ID","Student Name",
-                   "Payment Mode","Paid Amount","Received By","Notes"]
+                   "Payment Mode","Paid Amount","Received By","Notes",
+                   "Total Fees","Fees Paid","Balance Fees","Receipt Paid","Payment Status"]
 PLAN_HEADERS    = ["Plan ID","Course","Level","Duration","Fee","Description","Active"]
+COURSE_HEADERS  = ["Course","Course Code","Active"]
 FINANCE_HEADERS = ["Entry ID","Date","Type","Category","Amount","Description","Payment Mode","Reference","Notes"]
 SETTINGS_HEADERS= ["Key","Value"]
 
@@ -77,22 +78,20 @@ def safe_save(wb, path:Path):
             else: raise PermissionError(
                 f"File is open in Excel. Please close:\n{path.resolve()}\nThen try again.")
 
-def logo_b64() -> str|None:
-    if LOGO_PATH.exists():
-        with open(LOGO_PATH,"rb") as f: return base64.b64encode(f.read()).decode()
-    return None
-
 # ═══════════════════════════════════════════════════════════════════════════════
 class ExcelStore:
     def __init__(self, path:Path=DATA_FILE):
         self.path = path; self._ensure()
 
     def _ensure(self):
-        if self.path.exists(): return
+        if self.path.exists():
+            self._ensure_schema()
+            return
         wb = Workbook(); ws = wb.active; ws.title = "Dashboard"
         for name,hdrs in [("Students",STUDENT_HEADERS),("Invoices",INVOICE_HEADERS),
                           ("Payments",PAYMENT_HEADERS),("CoursePlans",PLAN_HEADERS),
-                          ("Finance",FINANCE_HEADERS),("Settings",SETTINGS_HEADERS)]:
+                          ("Courses",COURSE_HEADERS),("Finance",FINANCE_HEADERS),
+                          ("Settings",SETTINGS_HEADERS)]:
             w = wb.create_sheet(name); w.append(hdrs); self._sh(w)
         ws.append(["ROBOKIDY INNOVATIVE CENTRE - BILLING DASHBOARD"])
         s = wb["Settings"]
@@ -104,18 +103,40 @@ class ExcelStore:
             s.append([k,v])
         cp = wb["CoursePlans"]
         for row in [
-            ("PLN-001","Python","Level 1","Monthly",2500,"Python basics","Yes"),
-            ("PLN-002","Python","Level 2","Monthly",3000,"Python advanced","Yes"),
-            ("PLN-003","Robotics","Level 1","Monthly",3500,"Robotics basics","Yes"),
-            ("PLN-004","Arduino","Level 1","Monthly",3000,"Arduino basics","Yes"),
-            ("PLN-005","Scratch","Level 1","Monthly",2000,"Scratch basics","Yes"),
-            ("PLN-006","AI/ML","Level 1","Monthly",4000,"AI/ML monthly","Yes"),
-            ("PLN-007","IoT","Level 1","Monthly",3500,"IoT monthly","Yes"),
-            ("PLN-008","Web Dev","Level 1","Monthly",3000,"Web Dev monthly","Yes"),
-            ("PLN-009","Yearly All-Courses","All Levels","Yearly",25000,"All courses yearly plan","Yes"),
-            ("PLN-010","Yearly All-Courses","All Levels","Half-Yearly",14000,"All courses half-yearly","Yes"),
+            ("PLN-001","Python","Level 1","1 Month",2500,"Python basics","Yes"),
+            ("PLN-002","Python","Level 2","2 Month",3000,"Python advanced","Yes"),
+            ("PLN-003","Lego","Level 1","1 Month",2500,"Lego basics","Yes"),
+            ("PLN-004","Robotics","Level 1","1 Month",3500,"Robotics basics","Yes"),
+            ("PLN-005","Arduino","Level 1","1 Month",3000,"Arduino basics","Yes"),
+            ("PLN-006","Scratch","Level 1","1 Month",2000,"Scratch basics","Yes"),
+            ("PLN-007","AI/ML","Level 1","1 Month",4000,"AI/ML monthly","Yes"),
+            ("PLN-008","IoT","Level 1","1 Month",3500,"IoT monthly","Yes"),
+            ("PLN-009","Web Dev","Level 1","1 Month",3000,"Web Dev monthly","Yes"),
+            ("PLN-010","Yearly All-Courses","All Levels","12 Month",25000,"All courses yearly plan","Yes"),
         ]: cp.append(row)
+        cs = wb["Courses"]
+        for course in COURSES:
+            if course!="Other":
+                cs.append([course,COURSE_CODES.get(course,course[:2].upper()),"Yes"])
         safe_save(wb,self.path)
+
+    def _ensure_schema(self):
+        wb=self._wb(); changed=False
+        for name,hdrs in [("Students",STUDENT_HEADERS),("Invoices",INVOICE_HEADERS),
+                          ("Payments",PAYMENT_HEADERS),("CoursePlans",PLAN_HEADERS),
+                          ("Courses",COURSE_HEADERS),("Finance",FINANCE_HEADERS),
+                          ("Settings",SETTINGS_HEADERS)]:
+            if name not in wb.sheetnames:
+                ws=wb.create_sheet(name); ws.append(hdrs); changed=True
+            ws=wb[name]
+            current=[c.value for c in ws[1]]
+            for h in hdrs:
+                if h not in current:
+                    ws.cell(1,ws.max_column+1).value=h
+                    current.append(h); changed=True
+            self._sh(ws)
+        if changed:
+            safe_save(wb,self.path)
 
     def _wb(self): return load_workbook(self.path)
 
@@ -126,8 +147,15 @@ class ExcelStore:
             c.fill=fill; c.font=Font(color="FFFFFF",bold=True)
             c.alignment=Alignment(horizontal="center",vertical="center")
             c.border=Border(top=thin,left=thin,right=thin,bottom=thin)
+        for row in ws.iter_rows(min_row=2):
+            for c in row:
+                c.alignment=Alignment(vertical="center",wrap_text=True)
+                c.border=Border(top=thin,left=thin,right=thin,bottom=thin)
         ws.freeze_panes="A2"
-        for i,_ in enumerate(ws[1],1): ws.column_dimensions[get_column_letter(i)].width=20
+        for i,col in enumerate(ws.columns,1):
+            values=[str(c.value) for c in col if c.value is not None]
+            width=min(max([len(v) for v in values]+[12])+2,32)
+            ws.column_dimensions[get_column_letter(i)].width=width
 
     def rows(self,sheet): 
         wb=self._wb(); ws=wb[sheet]; hdrs=[c.value for c in ws[1]]
@@ -155,6 +183,30 @@ class ExcelStore:
         safe_save(wb,self.path)
 
     def settings(self): return {r["Key"]:r["Value"] for r in self.rows("Settings")}
+
+    def course_values(self):
+        vals=list(COURSES)
+        for r in self.rows("Courses"):
+            if str(r.get("Active","Yes"))!="No":
+                c=str(r.get("Course") or "").strip()
+                if c and c not in vals:
+                    vals.insert(max(len(vals)-1,0),c) if "Other" in vals else vals.append(c)
+        for sheet in ("Students","CoursePlans","Invoices"):
+            for r in self.rows(sheet):
+                c=str(r.get("Course") or "").strip()
+                if c and c not in vals:
+                    vals.insert(max(len(vals)-1,0),c) if "Other" in vals else vals.append(c)
+        return vals
+
+    def add_course(self,name):
+        name=str(name or "").strip()
+        if not name: raise ValueError("Course name required")
+        existing=[str(r.get("Course") or "").strip().lower() for r in self.rows("Courses")]
+        if name.lower() in existing or name in COURSES:
+            raise ValueError("Course already exists")
+        code="".join(ch for ch in name.upper() if ch.isalnum())[:2] or "CR"
+        self._append("Courses",[name,code,"Yes"])
+        return name
 
     def update_dashboard(self):
         wb=self._wb(); ws=wb["Dashboard"]; ws.delete_rows(1,ws.max_row)
@@ -226,13 +278,10 @@ class ExcelStore:
         da=round(fee*money(d["dv"])/100,2) if d["dt"]=="%" else money(d["dv"])
         sub=fee-da
         ta=round(sub*money(d["tv"])/100,2) if d["tt"]=="%" else money(d["tv"])
-        total=round(sub+ta,2); paid=money(d["paid"]); bal=round(total-paid,2)
-        status="Paid" if bal<=0 else ("Partial" if paid>0 else "Unpaid")
+        total=round(sub+ta,2); paid=0.0; bal=total; status="Unpaid"
         self._append("Invoices",[inv_no,d["date"],d["sid"],d["sname"],d["course"],d["level"],
             d["batch"],fee,d["dt"],money(d["dv"]),da,d["tt"],money(d["tv"]),ta,
-            total,paid,bal,status,d["mode"],d["due"],d["notes"]])
-        if paid>0:
-            self._save_pay(inv_no,d["sid"],d["sname"],d["mode"],paid,d["rcvd"],"Initial payment",update=False)
+            total,paid,bal,status,"",d["due"],d["notes"]])
         self.update_dashboard(); return inv_no
 
     def delete_invoice(self,inv_no):
@@ -243,6 +292,15 @@ class ExcelStore:
             if str(r.get("Invoice No"))==str(inv_no): return r
         return None
 
+    def find_invoice_for_payment(self,key):
+        key=str(key).strip()
+        inv=self.get_invoice(key)
+        if inv: return inv
+        matches=[r for r in self.rows("Invoices") if str(r.get("Student ID"))==key]
+        if not matches: return None
+        pending=[r for r in matches if money(r.get("Balance"))>0]
+        return (pending or matches)[-1]
+
     # ── Payments ───────────────────────────────────────────────────────────────
     def add_payment(self,d):
         r=self._save_pay(d["inv"],d["sid"],d["sname"],d["mode"],d["paid"],d["rcvd"],d["notes"])
@@ -250,24 +308,39 @@ class ExcelStore:
 
     def _save_pay(self,inv_no,sid,sname,mode,paid,rcvd,notes,update=True):
         rno=self.next_rcp()
-        self._append("Payments",[rno,datetime.now().strftime("%d-%m-%Y"),
-            inv_no,sid,sname,mode,money(paid),rcvd,notes])
+        pamt=money(paid); pay_date=datetime.now().strftime("%d-%m-%Y")
         if update:
             wb=self._wb(); ws=wb["Invoices"]; hdrs=[c.value for c in ws[1]]
             ic=hdrs.index("Invoice No")+1; pc=hdrs.index("Paid Amount")+1
             bc=hdrs.index("Balance")+1;    tc=hdrs.index("Total Amount")+1
-            sc=hdrs.index("Payment Status")+1
+            sc=hdrs.index("Payment Status")+1; mc=hdrs.index("Payment Mode")+1
             for r in range(2,ws.max_row+1):
                 if ws.cell(r,ic).value==inv_no:
-                    np2=money(ws.cell(r,pc).value)+money(paid)
+                    np2=money(ws.cell(r,pc).value)+pamt
                     tot=money(ws.cell(r,tc).value); nb=round(tot-np2,2)
                     ws.cell(r,pc).value=np2; ws.cell(r,bc).value=nb
-                    ws.cell(r,sc).value="Paid" if nb<=0 else "Partial"; break
+                    ws.cell(r,sc).value="Paid" if nb<=0 else "Partial"
+                    ws.cell(r,mc).value=mode
+                    break
             safe_save(wb,self.path)
+        inv=self.get_invoice(inv_no) or {}
+        total=money(inv.get("Total Amount"))
+        paid_after=money(inv.get("Paid Amount"))
+        balance=money(inv.get("Balance"))
+        status=inv.get("Payment Status","")
+        self._append("Payments",[rno,pay_date,inv_no,sid,sname,mode,pamt,rcvd,notes,
+            total,paid_after,balance,pamt,status])
+        self._append("Finance",[self.next_fin(),pay_date,"Income","Course Fee",pamt,
+            f"Fee payment from {sname}",mode,rno,notes])
         return rno
 
     def delete_payment(self,rno):
         self._delete("Payments","Receipt No",rno); self.update_dashboard()
+
+    def get_payment(self,rno):
+        for r in self.rows("Payments"):
+            if str(r.get("Receipt No"))==str(rno): return r
+        return None
 
     # ── Course Plans ───────────────────────────────────────────────────────────
     def add_plan(self,d):
@@ -302,14 +375,8 @@ class ExcelStore:
         self._delete("Finance","Entry ID",eid); self.update_dashboard()
 
 # ── HTML Invoice ───────────────────────────────────────────────────────────────
-def make_html(company,inv,receipt_no=None):
-    lb=logo_b64()
-    if lb:
-        logo_html=(f'<img src="data:image/jpeg;base64,{lb}" '
-                   f'style="height:72px;width:auto;object-fit:contain;'
-                   f'border-radius:8px;background:#fff;padding:4px;">')
-    else:
-        logo_html=f'<div style="font-size:24px;font-weight:900;color:#fff;">🤖 Robokidy</div>'
+def make_html(company,inv,receipt_no=None,payment=None):
+    logo_html=f'<div style="font-size:24px;font-weight:900;color:#fff;">{company.get("Company Name","Robokidy")}</div>'
     is_r=receipt_no is not None
     badge="RECEIPT" if is_r else "INVOICE"
     bcol=SECONDARY if is_r else "ffffff"
@@ -322,15 +389,21 @@ def make_html(company,inv,receipt_no=None):
     dt=inv.get("Discount Type","");        tt=inv.get("Tax Type","")
     disc=f"₹ {da:,.2f}"+( f" ({dv}%)" if dt=="%" else "")
     tax =f"₹ {ta:,.2f}"+( f" ({tv}% GST)" if tt=="%" else " (GST)")
-    st=inv.get("Payment Status","")
+    st=(payment or inv).get("Payment Status","")
     sc={"Paid":"#16a34a","Partial":"#d97706","Unpaid":"#dc2626"}.get(st,"#555")
     g=company.get("GSTIN","")
     gline=f'<div style="font-size:11px;color:#b8c8ff;margin-top:2px;">GSTIN: {g}</div>' if g else ""
+    doc_date=(payment or inv).get("Date","")
+    receipt_paid=money((payment or {}).get("Receipt Paid") or (payment or {}).get("Paid Amount"))
+    total_fees=money((payment or {}).get("Total Fees") or inv.get("Total Amount"))
+    fees_paid=money((payment or {}).get("Fees Paid") or inv.get("Paid Amount"))
+    balance_fees=money((payment or {}).get("Balance Fees") or inv.get("Balance"))
+    title_no=receipt_no if is_r else inv.get("Invoice No","")
     return f"""<!doctype html><html><head><meta charset="utf-8">
-<title>{badge} {inv.get('Invoice No','')}</title>
+<title>{badge} {title_no}</title>
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
-body{{font-family:Arial,Helvetica,sans-serif;background:#eef2ff;color:#222}}
+body{{font-family:Arial,Helvetica,sans-serif;background:#eef2ff;color:#222;-webkit-print-color-adjust:exact;print-color-adjust:exact}}
 .pg{{max-width:800px;margin:24px auto;background:#fff;border-radius:14px;box-shadow:0 6px 32px rgba(0,24,109,.15);overflow:hidden}}
 .hd{{background:linear-gradient(135deg,#{PRIMARY} 0%,#0a2d9c 100%);padding:24px 32px;display:flex;justify-content:space-between;align-items:center}}
 .badge{{background:#{bcol};color:{'#'+PRIMARY if not is_r else '#fff'};font-weight:700;font-size:14px;padding:9px 22px;border-radius:24px;letter-spacing:2px}}
@@ -347,7 +420,8 @@ table{{width:100%;border-collapse:collapse;border:1.5px solid #dde3f8;border-rad
 .pb{{display:flex;gap:10px;margin-bottom:20px}}
 .btn{{padding:9px 22px;border:none;border-radius:7px;font-weight:700;font-size:12px;cursor:pointer}}
 .bp{{background:#{PRIMARY};color:#fff}}.bs{{background:#{SECONDARY};color:#fff}}
-@media print{{.pb{{display:none!important}}body{{background:#fff}}.pg{{margin:0;box-shadow:none;border-radius:0}}}}
+@page{{margin:12mm}}
+@media print{{.pb{{display:none!important}}body{{background:#fff}}.pg{{margin:0;box-shadow:none;border-radius:0}}.hd,.tot td,.btn{{-webkit-print-color-adjust:exact;print-color-adjust:exact}}}}
 </style></head><body>
 <div class="pg">
 <div class="hd">
@@ -370,8 +444,7 @@ table{{width:100%;border-collapse:collapse;border:1.5px solid #dde3f8;border-rad
   <div class="grid">
     <div class="box"><h4>{'Receipt' if is_r else 'Invoice'} Details</h4>
       <p><strong>{'Receipt' if is_r else 'Invoice'} No:</strong> {receipt_no if is_r else inv.get('Invoice No','')}</p>
-      {'<p><strong>Invoice No:</strong> '+inv.get('Invoice No','')+'</p>' if is_r else ''}
-      <p><strong>Date:</strong> {inv.get('Date','')}</p>
+      <p><strong>Date:</strong> {doc_date}</p>
       {'<p><strong>Due Date:</strong> '+str(inv.get('Due Date',''))+'</p>' if not is_r else ''}
     </div>
     <div class="box"><h4>Student Details</h4>
@@ -386,10 +459,11 @@ table{{width:100%;border-collapse:collapse;border:1.5px solid #dde3f8;border-rad
     {row("Package / Fee",f"₹ {money(inv.get('Package/Fee')):,.2f}")}
     {row("Discount",disc if da else "—")}
     {row("Tax (GST)",tax if ta else "—")}
-    <tr class="tot"><td>TOTAL AMOUNT</td><td>₹ {money(inv.get('Total Amount')):,.2f}</td></tr>
-    {row("Paid Amount",f"₹ {money(inv.get('Paid Amount')):,.2f}")}
-    {row("Balance Due",f"₹ {money(inv.get('Balance')):,.2f}")}
-    {row("Payment Mode",inv.get('Payment Mode',''))}
+    <tr class="tot"><td>TOTAL FEES</td><td>₹ {total_fees:,.2f}</td></tr>
+    {row("Paid This Receipt",f"₹ {receipt_paid:,.2f}") if is_r else ""}
+    {row("Fees Paid",f"₹ {fees_paid:,.2f}")}
+    {row("Balance Fees",f"₹ {balance_fees:,.2f}")}
+    {row("Payment Mode",(payment or inv).get('Payment Mode',''))}
     {row("Payment Status",f'<span class="sb">{st}</span>')}
   </table>
   {'<p style="margin-top:14px;font-size:12px;color:#666"><b>Notes:</b> '+str(inv.get('Notes',''))+'</p>' if inv.get('Notes') else ''}
@@ -455,6 +529,7 @@ class Dialog(tk.Toplevel):
 class StudentDlg(Dialog):
     def __init__(self,parent,data=None):
         self._d=data or {}
+        self._courses=getattr(parent,"_course_values",COURSES)
         super().__init__(parent,"✏️ Edit Student" if data else "➕ Add Student",700,520)
     def _build(self):
         d=self._d; f=self.body; f.columnconfigure((1,3),weight=1)
@@ -464,7 +539,10 @@ class StudentDlg(Dialog):
         self.em=self.ef("Email",1,2,v=d.get("Email",""))
         self.gr=self.ef("Grade / Age",2,0,v=d.get("Grade/Age",""))
         self.ad=self.ef("Address",2,2,v=d.get("Address",""))
-        self.co=self.cb("Course *",COURSES,3,0,v=d.get("Course",""))
+        self.co=self.cb("Course *",self._courses,3,0,v=d.get("Course",""))
+        if d.get("Course") and d.get("Course") not in self._courses:
+            self.co["values"]=list(self._courses)+[d.get("Course")]
+            self.co.set(d.get("Course"))
         self.lv=self.cb("Level *",LEVELS,3,2,v=d.get("Level",""))
         self.ba=self.cb("Batch",BATCHES,4,0,v=d.get("Batch",""))
         self.st=self.cb("Status",["Active","Inactive","On Hold"],4,2,v=d.get("Status","Active"))
@@ -483,18 +561,26 @@ class StudentDlg(Dialog):
 class PlanDlg(Dialog):
     def __init__(self,parent,data=None):
         self._d=data or {}
+        self._courses=getattr(parent,"_course_values",COURSES)
         super().__init__(parent,"✏️ Edit Plan" if data else "➕ Add Course Plan",560,420)
     def _build(self):
         d=self._d; f=self.body; f.columnconfigure(1,weight=1)
-        self.co=self.cb("Course *",COURSES,0,v=d.get("Course",""))
-        self.lv=self.cb("Level",LEVELS,1,v=d.get("Level","Level 1"))
-        self.du=self.cb("Duration",DURATIONS,2,v=d.get("Duration","Monthly"))
-        self.fe=self.ef("Fee (₹) *",3,v=str(d.get("Fee","")))
-        self.de=self.ef("Description",4,w=36,v=d.get("Description",""))
-        self.ac=self.cb("Active",["Yes","No"],5,v=d.get("Active","Yes"))
+        self.co=self.cb("Course *",self._courses,0,v=d.get("Course",""))
+        other_course="" if d.get("Course","") in self._courses else d.get("Course","")
+        if other_course:
+            self.co.set("Other")
+        self.oc=self.ef("Other Course",1,v=other_course)
+        self.lv=self.cb("Level",LEVELS,2,v=d.get("Level","Level 1"))
+        self.du=self.cb("Duration",DURATIONS,3,v=d.get("Duration","1 Month"))
+        self.fe=self.ef("Fee (₹) *",4,v=str(d.get("Fee","")))
+        self.de=self.ef("Description",5,w=36,v=d.get("Description",""))
+        self.ac=self.cb("Active",["Yes","No"],6,v=d.get("Active","Yes"))
     def _save(self):
         if not self.fe.get().strip(): return messagebox.showerror("Missing","Fee required",parent=self)
-        self.result={"course":self.co.get(),"level":self.lv.get(),"duration":self.du.get(),
+        course=self.oc.get().strip() if self.co.get()=="Other" else self.co.get().strip()
+        if self.co.get()=="Other" and not course:
+            return messagebox.showerror("Missing","Enter the other course name",parent=self)
+        self.result={"course":course,"level":self.lv.get(),"duration":self.du.get(),
             "fee":self.fe.get(),"desc":self.de.get().strip(),"active":self.ac.get()}
         self.destroy()
 
@@ -540,10 +626,11 @@ class FinanceDlg(Dialog):
 class BillingApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Robokidy Innovative Centre — Billing Software v4.0")
+        self.title("Robokidy Innovative Centre — Billing Software v5.0")
         self.geometry("1260x820"); self.minsize(980,640)
         self.store=ExcelStore(); self.configure(bg=BG_LIGHT)
         INVOICE_DIR.mkdir(exist_ok=True)
+        self._course_values=list(COURSES)
         self._slookup={}; self._plan_map={}
         self._build(); self.refresh_all()
 
@@ -552,7 +639,7 @@ class BillingApp(tk.Tk):
         tb=tk.Frame(self,bg=f"#{PRIMARY}",height=56); tb.pack(fill="x"); tb.pack_propagate(False)
         tk.Label(tb,text="  🤖  ROBOKIDY INNOVATIVE CENTRE",bg=f"#{PRIMARY}",fg="white",
                  font=("Segoe UI",15,"bold")).pack(side="left",padx=14)
-        tk.Label(tb,text="Billing v4.0",bg=f"#{PRIMARY}",fg=f"#{SECONDARY}",
+        tk.Label(tb,text="Billing v5.0",bg=f"#{PRIMARY}",fg=f"#{SECONDARY}",
                  font=("Segoe UI",10)).pack(side="left")
         self._clk=tk.Label(tb,bg=f"#{PRIMARY}",fg="#aabbff",font=("Segoe UI",10))
         self._clk.pack(side="right",padx=16); self._tick()
@@ -619,6 +706,77 @@ class BillingApp(tk.Tk):
             tag="income" if r.get("Type")=="Income" else "expense"
             tree.insert("","end",values=[r.get(h,"") for h in hdrs],tags=(tag,))
 
+    def _date_obj(self,ds):
+        for fmt in ["%d-%m-%Y","%Y-%m-%d","%d/%m/%Y"]:
+            try: return datetime.strptime(str(ds),fmt)
+            except: pass
+        return None
+
+    def _date_ok(self,row_date,start,end):
+        d=self._date_obj(row_date)
+        if start and start!="All":
+            sd=self._date_obj(start)
+            if sd and (not d or d<sd): return False
+        if end and end!="All":
+            ed=self._date_obj(end)
+            if ed and (not d or d>ed): return False
+        return True
+
+    def _student_pick_text(self,student):
+        return f"{student.get('Student ID','')} - {student.get('Student Name','')}"
+
+    def _student_id_from_pick(self,value):
+        text=str(value or "").strip()
+        if " - " in text:
+            return text.split(" - ",1)[0].strip()
+        return text
+
+    def _filter_payment_students(self,_=None):
+        if not hasattr(self,"pi_sid"): return
+        if _ and getattr(_,"keysym","") in ("Return","Tab","Escape","Up","Down","Left","Right"):
+            return
+        q=self.pi_sid.get().strip().lower()
+        vals=getattr(self,"_payment_student_values",[])
+        if q:
+            vals=[v for v in vals if v.lower().startswith(q) or
+                  " - " in v and v.split(" - ",1)[1].lower().startswith(q) or
+                  q in v.lower()]
+        self.pi_sid["values"]=vals
+        if vals:
+            try: self.pi_sid.event_generate("<Down>")
+            except: pass
+
+    def _dates_for(self,rows,col):
+        vals=sorted({str(r.get(col) or "") for r in rows if r.get(col)}, key=lambda x:self._date_obj(x) or datetime.min)
+        return ["All"]+vals
+
+    def _export_rows(self,title,rows,hdrs):
+        if not rows: return messagebox.showwarning("Export","No rows to export")
+        sel=filedialog.asksaveasfilename(defaultextension=".xlsx",
+            filetypes=[("Excel","*.xlsx")],title=f"Save {title} Report",
+            initialfile=f"{title.replace(' ','_')}_{datetime.now().strftime('%Y%m%d')}.xlsx",
+            initialdir=str(BASE_DIR))
+        if not sel: return
+        wb=Workbook(); ws=wb.active; ws.title=title[:31]
+        ws.append(hdrs)
+        for r in rows: ws.append([r.get(h,"") for h in hdrs])
+        ExcelStore._sh(ws); safe_save(wb,Path(sel))
+        messagebox.showinfo("Exported",f"Report saved:\n{sel}")
+
+    def _filter_bar(self,parent,fields,apply_cmd,clear_cmd,export_cmd=None):
+        bar=tk.Frame(parent,bg=BG_WHITE); bar.pack(fill="x",padx=10,pady=(4,2))
+        ctrls={}
+        for label,vals,width in fields:
+            tk.Label(bar,text=label,bg=BG_WHITE,font=("Segoe UI",9)).pack(side="left",padx=(6,2))
+            cb=ttk.Combobox(bar,values=vals,state=("normal" if label in ("From","To") else "readonly"),width=width)
+            cb.set("All"); cb.pack(side="left",padx=(0,6))
+            ctrls[label]=cb
+        sbtn(bar,"🔍 Filter",apply_cmd,bg=f"#{PRIMARY}",px=10,py=5).pack(side="left",padx=4)
+        sbtn(bar,"🔄 Clear",clear_cmd,bg="#888",px=10,py=5).pack(side="left",padx=4)
+        if export_cmd:
+            sbtn(bar,"⬇ Export Excel",export_cmd,bg=f"#{SECONDARY}",px=10,py=5).pack(side="left",padx=4)
+        return ctrls
+
     def _ff_frame(self,parent):
         f=tk.Frame(parent,bg=BG_WHITE,padx=8,pady=10); f.pack(fill="x",padx=10,pady=(8,2)); return f
 
@@ -684,7 +842,32 @@ class BillingApp(tk.Tk):
             ("🔄  Clear Form",     self._clr_stu,  "#888"),
         ])
         tk.Frame(f,bg="#dde3f8",height=2).pack(fill="x",padx=10,pady=2)
+        self.st_filters=self._filter_bar(f,[
+            ("Course",["All"]+self._course_values,14),
+            ("Level",["All"]+LEVELS,12),
+            ("Status",["All","Active","Inactive","On Hold"],10),
+            ("Fee Status",["All","Paid","Partial","Unpaid"],10),
+            ("From",["All"],12),("To",["All"],12),
+        ],self._apply_stu_filter,self._clear_stu_filter,
+          lambda:self._export_rows("Students",getattr(self,"_filtered_students",[]),STUDENT_HEADERS))
         self.st_tree=self._treef(f,STUDENT_HEADERS)
+
+    def _apply_stu_filter(self):
+        rows=self.store.rows("Students")
+        f=self.st_filters
+        rows=[r for r in rows if (f["Course"].get()=="All" or r.get("Course")==f["Course"].get())]
+        rows=[r for r in rows if (f["Level"].get()=="All" or r.get("Level")==f["Level"].get())]
+        rows=[r for r in rows if (f["Status"].get()=="All" or r.get("Status")==f["Status"].get())]
+        if f["Fee Status"].get()!="All":
+            invoices=self.store.rows("Invoices")
+            rows=[r for r in rows if any(str(i.get("Student ID"))==str(r.get("Student ID")) and
+                  i.get("Payment Status")==f["Fee Status"].get() for i in invoices)]
+        rows=[r for r in rows if self._date_ok(r.get("Joining Date",""),f["From"].get(),f["To"].get())]
+        self._filtered_students=rows; self._fill(self.st_tree,rows,STUDENT_HEADERS)
+
+    def _clear_stu_filter(self):
+        for c in self.st_filters.values(): c.set("All")
+        self._apply_stu_filter()
 
     def _prev_sid(self,_=None):
         c=self.sco.get(); l=self.slv.get()
@@ -783,14 +966,11 @@ class BillingApp(tk.Tk):
         tk.Radiobutton(ti,text="₹",variable=self.i_tt,value="₹",bg=BG_WHITE,
                        font=("Segoe UI",9),fg=f"#{PRIMARY}").pack(side="left")
 
-        self.i_paid=self._ff(form,"Paid Now (₹)",3,4,val="0")
-        self.i_mode=self._fc(form,"Payment Mode",PAY_MODES,4,0); self.i_mode.set("Cash")
-        self.i_rcvd=self._ff(form,"Received By",4,2,val="Admin")
-        self.i_note=self._ff(form,"Notes",4,4)
+        self.i_note=self._ff(form,"Notes",4,0,w=50,cs=5)
 
         self._tlbl=tk.Label(form,text="",bg=BG_WHITE,font=("Segoe UI",9,"bold"),fg=f"#{ACCENT}")
         self._tlbl.grid(row=5,column=0,columnspan=6,sticky="w",padx=10,pady=2)
-        for w in [self.i_fee,self.i_dv,self.i_tv,self.i_paid]:
+        for w in [self.i_fee,self.i_dv,self.i_tv]:
             w.bind("<KeyRelease>",self._prev_total)
         self.i_dt.trace_add("write",lambda *_:self._prev_total())
         self.i_tt.trace_add("write",lambda *_:self._prev_total())
@@ -802,7 +982,27 @@ class BillingApp(tk.Tk):
             ("🔄  Clear Form",       self._clr_inv,    "#888"),
         ])
         tk.Frame(f,bg="#dde3f8",height=2).pack(fill="x",padx=10,pady=2)
+        self.inv_filters=self._filter_bar(f,[
+            ("Course",["All"]+self._course_values,14),
+            ("Level",["All"]+LEVELS,12),
+            ("Status",["All","Paid","Partial","Unpaid"],10),
+            ("From",["All"],12),("To",["All"],12),
+        ],self._apply_inv_filter,self._clear_inv_filter,
+          lambda:self._export_rows("Invoices",getattr(self,"_filtered_invoices",[]),INVOICE_HEADERS))
         self.i_tree=self._treef(f,INVOICE_HEADERS)
+
+    def _apply_inv_filter(self):
+        rows=self.store.rows("Invoices")
+        f=self.inv_filters
+        rows=[r for r in rows if (f["Course"].get()=="All" or r.get("Course")==f["Course"].get())]
+        rows=[r for r in rows if (f["Level"].get()=="All" or r.get("Level")==f["Level"].get())]
+        rows=[r for r in rows if (f["Status"].get()=="All" or r.get("Payment Status")==f["Status"].get())]
+        rows=[r for r in rows if self._date_ok(r.get("Date",""),f["From"].get(),f["To"].get())]
+        self._filtered_invoices=rows; self._fill(self.i_tree,rows,INVOICE_HEADERS)
+
+    def _clear_inv_filter(self):
+        for c in self.inv_filters.values(): c.set("All")
+        self._apply_inv_filter()
 
     def _fill_stu_inv(self,_=None):
         s=self._slookup.get(self.i_stu.get())
@@ -830,10 +1030,10 @@ class BillingApp(tk.Tk):
             fee=money(self.i_fee.get()); dv=money(self.i_dv.get()); tv=money(self.i_tv.get())
             da=round(fee*dv/100,2) if self.i_dt.get()=="%" else dv
             sub=fee-da; ta=round(sub*tv/100,2) if self.i_tt.get()=="%" else tv
-            tot=sub+ta; pd=money(self.i_paid.get()); bal=tot-pd
+            tot=sub+ta; bal=tot
             self._tlbl.config(text=
                 f"  Fee ₹{fee:,.2f}  –  Disc ₹{da:,.2f}  +  Tax ₹{ta:,.2f}"
-                f"  =  Total ₹{tot:,.2f}   |   Paid ₹{pd:,.2f}   |   Balance ₹{bal:,.2f}")
+                f"  =  Total ₹{tot:,.2f}   |   Balance ₹{bal:,.2f}")
         except: pass
 
     def _create_inv(self):
@@ -845,8 +1045,7 @@ class BillingApp(tk.Tk):
                 "sname":s.get("Student Name"),"course":self.i_cr.get(),"level":self.i_lv.get(),
                 "batch":self.i_ba.get(),"fee":self.i_fee.get(),"dt":self.i_dt.get(),
                 "dv":self.i_dv.get(),"tt":self.i_tt.get(),"tv":self.i_tv.get(),
-                "paid":self.i_paid.get(),"mode":self.i_mode.get(),"due":self.i_due.get(),
-                "rcvd":self.i_rcvd.get(),"notes":self.i_note.get()})
+                "due":self.i_due.get(),"notes":self.i_note.get()})
             self._open_html(inv_no)
             messagebox.showinfo("Created ✓",f"Invoice: {inv_no}\nOpened for printing.")
             self._clr_inv(); self.refresh_all()
@@ -870,8 +1069,7 @@ class BillingApp(tk.Tk):
         for w in [self.i_cr,self.i_lv,self.i_ba,self.i_fee,self.i_note,self.i_due]: w.delete(0,tk.END)
         self.i_dv.delete(0,tk.END); self.i_dv.insert(0,"0")
         self.i_tv.delete(0,tk.END); self.i_tv.insert(0,"0")
-        self.i_paid.delete(0,tk.END); self.i_paid.insert(0,"0")
-        self.i_stu.set(""); self.i_mode.set("Cash"); self.i_plan.set("")
+        self.i_stu.set(""); self.i_plan.set("")
         self.i_dt.set("%"); self.i_tt.set("%"); self._tlbl.config(text="")
 
     def _open_html(self,inv_no):
@@ -888,48 +1086,95 @@ class BillingApp(tk.Tk):
         f=tk.Frame(self.nb,bg=BG_WHITE); self.nb.add(f,text="💳  Payments")
         slbl(f,"  Add Payment / Receipt").pack(anchor="w",padx=14,pady=(10,0))
         form=self._ff_frame(f); form.columnconfigure((1,3,5),weight=1)
-        self.pi =self._ff(form,"Invoice No *",0,0)
-        self.pam=self._ff(form,"Amount (₹) *",0,2)
-        self.pm =self._fc(form,"Payment Mode",PAY_MODES,0,4); self.pm.set("Cash")
-        self.prb=self._ff(form,"Received By",1,0,val="Admin")
-        self.pnt=self._ff(form,"Notes",1,2,w=50,cs=3)
-        self._pinf=tk.Label(form,text="",bg=BG_WHITE,font=("Segoe UI",9,"italic"),fg="#666")
-        self._pinf.grid(row=2,column=0,columnspan=6,sticky="w",padx=10,pady=2)
-        self.pi.bind("<FocusOut>",self._lookup_inv)
-        self.pi.bind("<Return>",  self._lookup_inv)
+        self.pi_inv=self._fc(form,"Invoice ID",[],0,0); self.pi_inv.config(state="normal")
+        self.pi_sid=self._fc(form,"Student ID",[],0,2); self.pi_sid.config(state="normal")
+        self.pam=self._ff(form,"Amount (₹) *",0,4)
+        self.pm =self._fc(form,"Payment Mode",PAY_MODES,1,0); self.pm.set("Cash")
+        self.prb=self._ff(form,"Received By",1,2,val="Admin")
+        self.pnt=self._ff(form,"Notes",1,4)
+        detail=tk.Frame(form,bg="#f4f6ff",bd=1,relief="solid")
+        detail.grid(row=2,column=0,columnspan=6,sticky="ew",padx=10,pady=6)
+        self._pinf=tk.Label(detail,text="Select an invoice ID or student ID to load payment details.",
+                            bg="#f4f6ff",font=("Segoe UI",9,"bold"),fg="#444",
+                            justify="left",anchor="w")
+        self._pinf.pack(fill="x",padx=10,pady=8)
+        for w in [self.pi_inv,self.pi_sid]:
+            w.bind("<<ComboboxSelected>>",self._lookup_inv)
+            w.bind("<FocusOut>",self._lookup_inv)
+            w.bind("<Return>",self._lookup_inv)
+        self.pi_sid.bind("<KeyRelease>",self._filter_payment_students)
         self._abar(f,[
             ("💳  Add Payment & Print Receipt",self._add_pay,     f"#{SECONDARY}"),
             ("🖨️  Reprint Selected Receipt",   self._reprint,     f"#{PRIMARY}"),
             ("🗑️  Delete Selected Payment",    self._del_pay,     f"#{DANGER}"),
         ])
         tk.Frame(f,bg="#dde3f8",height=2).pack(fill="x",padx=10,pady=2)
+        self.pay_filters=self._filter_bar(f,[
+            ("Course",["All"]+self._course_values,14),
+            ("Level",["All"]+LEVELS,12),
+            ("Status",["All","Paid","Partial","Unpaid"],10),
+            ("From",["All"],12),("To",["All"],12),
+        ],self._apply_pay_filter,self._clear_pay_filter,
+          lambda:self._export_rows("Payments",getattr(self,"_filtered_payments",[]),PAYMENT_HEADERS))
         self.p_tree=self._treef(f,PAYMENT_HEADERS)
 
+    def _apply_pay_filter(self):
+        rows=self.store.rows("Payments")
+        invoices={str(r.get("Invoice No")):r for r in self.store.rows("Invoices")}
+        f=self.pay_filters
+        def inv_for(r): return invoices.get(str(r.get("Invoice No")),{})
+        rows=[r for r in rows if (f["Course"].get()=="All" or inv_for(r).get("Course")==f["Course"].get())]
+        rows=[r for r in rows if (f["Level"].get()=="All" or inv_for(r).get("Level")==f["Level"].get())]
+        rows=[r for r in rows if (f["Status"].get()=="All" or r.get("Payment Status")==f["Status"].get())]
+        rows=[r for r in rows if self._date_ok(r.get("Date",""),f["From"].get(),f["To"].get())]
+        self._filtered_payments=rows; self._fill(self.p_tree,rows,PAYMENT_HEADERS)
+
+    def _clear_pay_filter(self):
+        for c in self.pay_filters.values(): c.set("All")
+        self._apply_pay_filter()
+
     def _lookup_inv(self,_=None):
-        inv=self.store.get_invoice(self.pi.get().strip())
+        prefer_student=bool(_ and getattr(_,"widget",None) is getattr(self,"pi_sid",None))
+        inv_key=self.pi_inv.get().strip()
+        sid_key=self._student_id_from_pick(self.pi_sid.get())
+        inv=None
+        if not prefer_student and inv_key:
+            inv=self.store.get_invoice(inv_key)
+        if not inv and sid_key:
+            inv=self.store.find_invoice_for_payment(sid_key)
+        if not inv and inv_key:
+            inv=self.store.find_invoice_for_payment(inv_key)
         if inv:
+            self.pi_inv.set(str(inv.get("Invoice No","")))
+            self.pi_sid.set(f"{inv.get('Student ID','')} - {inv.get('Student Name','')}")
             self._pinf.config(fg=f"#{SECONDARY}",
-                text=f"✓ {inv.get('Student Name','')}  |  "
-                     f"Total ₹{money(inv.get('Total Amount')):,.2f}  |  "
-                     f"Paid ₹{money(inv.get('Paid Amount')):,.2f}  |  "
-                     f"Balance ₹{money(inv.get('Balance')):,.2f}  |  "
-                     f"{inv.get('Payment Status','')}")
-        else: self._pinf.config(fg=f"#{DANGER}",text="✗ Invoice not found")
+                text=f"Student Name: {inv.get('Student Name','')}\n"
+                     f"Student ID: {inv.get('Student ID','')}    Invoice ID: {inv.get('Invoice No','')}\n"
+                     f"Course Joined: {inv.get('Course','')} - {inv.get('Level','')}\n"
+                     f"Course Fees: ₹{money(inv.get('Total Amount')):,.2f}    "
+                     f"Fees Paid: ₹{money(inv.get('Paid Amount')):,.2f}    "
+                     f"Balance: ₹{money(inv.get('Balance')):,.2f}\n"
+                     f"Status: {inv.get('Payment Status','')}")
+            receipts=[r for r in self.store.rows("Payments")
+                      if str(r.get("Invoice No"))==str(inv.get("Invoice No"))]
+            self._fill(self.p_tree,receipts,PAYMENT_HEADERS)
+        else: self._pinf.config(fg=f"#{DANGER}",text="✗ Invoice / Student ID not found")
 
     def _add_pay(self):
-        inv=self.store.get_invoice(self.pi.get().strip())
-        if not inv: return messagebox.showerror("Not Found","Invoice not found")
+        inv=self.store.get_invoice(self.pi_inv.get().strip()) or self.store.find_invoice_for_payment(self._student_id_from_pick(self.pi_sid.get()))
+        if not inv: return messagebox.showerror("Not Found","Invoice / Student ID not found")
         if not self.pam.get().strip(): return messagebox.showerror("Missing","Enter amount")
         try:
             rno=self.store.add_payment({"inv":inv["Invoice No"],"sid":inv["Student ID"],
                 "sname":inv["Student Name"],"mode":self.pm.get(),
                 "paid":self.pam.get(),"rcvd":self.prb.get(),"notes":self.pnt.get()})
             upd=self.store.get_invoice(inv["Invoice No"])
-            html=make_html(self.store.settings(),upd,receipt_no=rno)
+            payment=self.store.get_payment(rno)
+            html=make_html(self.store.settings(),upd,receipt_no=rno,payment=payment)
             path=INVOICE_DIR/f"{rno}.html"; path.write_text(html,encoding="utf-8")
             webbrowser.open(path.resolve().as_uri())
             messagebox.showinfo("Receipt ✓",f"Receipt: {rno}\nOpened for printing.")
-            for w in [self.pi,self.pam,self.pnt]: w.delete(0,tk.END)
+            for w in [self.pi_inv,self.pi_sid,self.pam,self.pnt]: w.delete(0,tk.END)
             self._pinf.config(text=""); self.refresh_all()
         except PermissionError as e: self._pe(str(e))
 
@@ -939,7 +1184,8 @@ class BillingApp(tk.Tk):
         vals=self.p_tree.item(sel[0],"values"); rno=vals[0]; inv_no=vals[2]
         inv=self.store.get_invoice(inv_no)
         if not inv: return messagebox.showerror("Not Found","Invoice not found")
-        html=make_html(self.store.settings(),inv,receipt_no=rno)
+        payment=self.store.get_payment(rno)
+        html=make_html(self.store.settings(),inv,receipt_no=rno,payment=payment)
         path=INVOICE_DIR/f"{rno}.html"; path.write_text(html,encoding="utf-8")
         webbrowser.open(path.resolve().as_uri())
 
@@ -963,11 +1209,44 @@ class BillingApp(tk.Tk):
                       "Yearly All-Courses = student attends ALL courses for the year."
                  ).pack(fill="x",padx=8,pady=6)
         self._abar(f,[
+            ("➕  Add Course",      self._add_course, f"#{ACCENT}"),
             ("➕  Add Plan",        self._add_plan,  f"#{SECONDARY}"),
             ("✏️  Edit Selected",   self._edit_plan, f"#{PRIMARY}"),
             ("🗑️  Delete Selected", self._del_plan,  f"#{DANGER}"),
         ])
+        self.plan_filters=self._filter_bar(f,[
+            ("Course",["All"]+self._course_values,14),
+            ("Level",["All"]+LEVELS,12),
+            ("Status",["All","Yes","No"],8),
+            ("Duration",["All"]+DURATIONS,10),
+        ],self._apply_plan_filter,self._clear_plan_filter,
+          lambda:self._export_rows("Course_Plans",getattr(self,"_filtered_plans",[]),PLAN_HEADERS))
         self.pl_tree=self._treef(f,PLAN_HEADERS,h=18)
+
+    def _apply_plan_filter(self):
+        rows=self.store.rows("CoursePlans")
+        f=self.plan_filters
+        rows=[r for r in rows if (f["Course"].get()=="All" or r.get("Course")==f["Course"].get())]
+        rows=[r for r in rows if (f["Level"].get()=="All" or r.get("Level")==f["Level"].get())]
+        rows=[r for r in rows if (f["Status"].get()=="All" or r.get("Active")==f["Status"].get())]
+        rows=[r for r in rows if (f["Duration"].get()=="All" or r.get("Duration")==f["Duration"].get())]
+        self._filtered_plans=rows; self._fill(self.pl_tree,rows,PLAN_HEADERS)
+
+    def _clear_plan_filter(self):
+        for c in self.plan_filters.values(): c.set("All")
+        self._apply_plan_filter()
+
+    def _add_course(self):
+        name=simpledialog.askstring("Add Course","Enter new course name:",parent=self)
+        if not name: return
+        try:
+            course=self.store.add_course(name)
+            messagebox.showinfo("Added ✓",f"Course added: {course}")
+            self.refresh_all()
+        except ValueError as e:
+            messagebox.showerror("Course",str(e))
+        except PermissionError as e:
+            self._pe(str(e))
 
     def _add_plan(self):
         dlg=PlanDlg(self)
@@ -1028,8 +1307,16 @@ class BillingApp(tk.Tk):
         self._fin_year=ttk.Combobox(fbar,values=["All"]+[str(y) for y in range(yr-2,yr+3)],
                                     state="readonly",width=8)
         self._fin_year.set(str(yr)); self._fin_year.pack(side="left",padx=4)
+        tk.Label(fbar,text="From:",bg=BG_WHITE,font=("Segoe UI",9)).pack(side="left",padx=(6,2))
+        self._fin_from=ttk.Combobox(fbar,values=["All"],state="normal",width=12)
+        self._fin_from.set("All"); self._fin_from.pack(side="left",padx=4)
+        tk.Label(fbar,text="To:",bg=BG_WHITE,font=("Segoe UI",9)).pack(side="left",padx=(6,2))
+        self._fin_to=ttk.Combobox(fbar,values=["All"],state="normal",width=12)
+        self._fin_to.set("All"); self._fin_to.pack(side="left",padx=4)
         sbtn(fbar,"🔍 Apply Filter",self._apply_fin_filter,bg=f"#{PRIMARY}",px=10,py=5).pack(side="left",padx=6)
         sbtn(fbar,"🔄 Clear",self._clear_fin_filter,bg="#888",px=10,py=5).pack(side="left")
+        sbtn(fbar,"⬇ Export Excel",lambda:self._export_rows("Finance",getattr(self,"_filtered_finance",[]),FINANCE_HEADERS),
+             bg=f"#{SECONDARY}",px=10,py=5).pack(side="left",padx=4)
 
         self._abar(f,[
             ("➕  Add Income",     lambda:self._add_fin("Income"),  f"#{SUCCESS}"),
@@ -1082,11 +1369,14 @@ class BillingApp(tk.Tk):
             rows=[r for r in rows if self._date_month(r.get("Date",""))==mi]
         if fy!="All":
             rows=[r for r in rows if self._date_year(r.get("Date",""))==int(fy)]
+        rows=[r for r in rows if self._date_ok(r.get("Date",""),self._fin_from.get(),self._fin_to.get())]
+        self._filtered_finance=rows
         self._fill_fin(self.fin_tree,rows,FINANCE_HEADERS)
 
     def _clear_fin_filter(self):
         self._fin_type.set("All"); self._fin_month.set("All")
         self._fin_year.set(str(datetime.now().year))
+        self._fin_from.set("All"); self._fin_to.set("All")
         self._apply_fin_filter()
 
     @staticmethod
@@ -1121,8 +1411,16 @@ class BillingApp(tk.Tk):
             ("📁 Switch File",   self._switch_file, "#555"),
         ]: sbtn(bar,txt,cmd,bg=bg).pack(side="left",padx=5,pady=4)
         tk.Frame(f,bg="#dde3f8",height=2).pack(fill="x",padx=14,pady=10)
-        slbl(f,"  Pending Balances").pack(anchor="w",padx=14,pady=(0,4))
+        slbl(f,"  Invoice Reports").pack(anchor="w",padx=14,pady=(0,4))
         pc=["Invoice No","Date","Student Name","Total Amount","Paid Amount","Balance","Due Date","Payment Status"]
+        self.rpt_cols=pc
+        self.rpt_filters=self._filter_bar(f,[
+            ("Course",["All"]+self._course_values,14),
+            ("Level",["All"]+LEVELS,12),
+            ("Status",["All","Paid","Partial","Unpaid"],10),
+            ("From",["All"],12),("To",["All"],12),
+        ],self._apply_report_filter,self._clear_report_filter,
+          lambda:self._export_rows("Reports",getattr(self,"_filtered_reports",[]),self.rpt_cols))
         self.rpt_tree=self._treef(f,pc,h=13)
         tk.Label(f,text="  💡 Backup robokidy_billing_data.xlsx regularly.",
                  bg=BG_WHITE,fg="#888",font=("Segoe UI",9,"italic")).pack(pady=6)
@@ -1134,6 +1432,20 @@ class BillingApp(tk.Tk):
         if sel:
             global DATA_FILE
             DATA_FILE=Path(sel); self.store=ExcelStore(DATA_FILE); self.refresh_all()
+
+    def _apply_report_filter(self):
+        rows=self.store.rows("Invoices")
+        f=self.rpt_filters
+        rows=[r for r in rows if (f["Course"].get()=="All" or r.get("Course")==f["Course"].get())]
+        rows=[r for r in rows if (f["Level"].get()=="All" or r.get("Level")==f["Level"].get())]
+        rows=[r for r in rows if (f["Status"].get()=="All" or r.get("Payment Status")==f["Status"].get())]
+        rows=[r for r in rows if self._date_ok(r.get("Date",""),f["From"].get(),f["To"].get())]
+        self._filtered_reports=rows
+        self._fill(self.rpt_tree,rows,self.rpt_cols)
+
+    def _clear_report_filter(self):
+        for c in self.rpt_filters.values(): c.set("All")
+        self._apply_report_filter()
 
     # ══════════════════════════════════════════════════════════════════════════
     # REFRESH ALL
@@ -1147,6 +1459,7 @@ class BillingApp(tk.Tk):
         payments=self.store.rows("Payments")
         plans   =self.store.rows("CoursePlans")
         finance =self.store.rows("Finance")
+        self._course_values=self.store.course_values()
 
         tb=sum(money(r.get("Total Amount")) for r in invoices)
         tr=sum(money(r.get("Paid Amount"))  for r in invoices)
@@ -1191,7 +1504,49 @@ class BillingApp(tk.Tk):
         self._slookup={
             f"{s.get('Student ID')} — {s.get('Student Name')} ({s.get('Course','')})":s
             for s in students}
+        if hasattr(self,"sco"): self.sco["values"]=self._course_values
+        for attr in ["st_filters","inv_filters","pay_filters","plan_filters","rpt_filters"]:
+            flt=getattr(self,attr,None)
+            if flt and "Course" in flt:
+                cur=flt["Course"].get()
+                flt["Course"]["values"]=["All"]+self._course_values
+                flt["Course"].set(cur if cur in flt["Course"]["values"] else "All")
+        if hasattr(self,"st_filters"):
+            dates=self._dates_for(students,"Joining Date")
+            self.st_filters["From"]["values"]=dates; self.st_filters["To"]["values"]=dates
+            self._apply_stu_filter()
+        if hasattr(self,"inv_filters"):
+            dates=self._dates_for(invoices,"Date")
+            self.inv_filters["From"]["values"]=dates; self.inv_filters["To"]["values"]=dates
+            self._apply_inv_filter()
+        if hasattr(self,"pay_filters"):
+            dates=self._dates_for(payments,"Date")
+            self.pay_filters["From"]["values"]=dates; self.pay_filters["To"]["values"]=dates
+            self._apply_pay_filter()
+        if hasattr(self,"plan_filters"):
+            self._apply_plan_filter()
+        if hasattr(self,"_fin_from"):
+            dates=self._dates_for(finance,"Date")
+            self._fin_from["values"]=dates; self._fin_to["values"]=dates
+            self._apply_fin_filter()
+        if hasattr(self,"rpt_filters"):
+            dates=self._dates_for(invoices,"Date")
+            self.rpt_filters["From"]["values"]=dates; self.rpt_filters["To"]["values"]=dates
+            self._apply_report_filter()
         if hasattr(self,"i_stu"): self.i_stu["values"]=list(self._slookup.keys())
+        if hasattr(self,"pi_inv"):
+            self.pi_inv["values"]=[str(r.get("Invoice No","")) for r in invoices if r.get("Invoice No")]
+        if hasattr(self,"pi_sid"):
+            seen=[]
+            student_names={str(s.get("Student ID","")):str(s.get("Student Name","")) for s in students}
+            for r in invoices:
+                sid=str(r.get("Student ID",""))
+                name=str(r.get("Student Name") or student_names.get(sid,""))
+                label=f"{sid} - {name}" if name else sid
+                if sid and label not in seen:
+                    seen.append(label)
+            self._payment_student_values=seen
+            self.pi_sid["values"]=seen
         self._reload_plans()
 
 if __name__=="__main__":
