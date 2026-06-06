@@ -537,6 +537,7 @@ def make_html(company,inv,receipt_no=None,payment=None):
     sc={"Paid":"#16a34a","Partial":"#d97706","Unpaid":"#dc2626"}.get(st,"#555")
     g=company.get("GSTIN","")
     gline=f'<div style="font-size:11px;color:#b8c8ff;margin-top:2px;">GSTIN: {g}</div>' if g else ""
+    gst_details=f'<p><strong>GSTIN:</strong> {g}</p>' if g else ""
     doc_date=(payment or inv).get("Date","")
     receipt_paid=money((payment or {}).get("Receipt Paid") or (payment or {}).get("Paid Amount"))
     total_fees=money((payment or {}).get("Total Fees") or inv.get("Total Amount"))
@@ -588,6 +589,7 @@ table{{width:100%;border-collapse:collapse;border:1.5px solid #dde3f8;border-rad
     <div class="box"><h4>{'Receipt' if is_r else 'Invoice'} Details</h4>
       <p><strong>{'Receipt' if is_r else 'Invoice'} No:</strong> {receipt_no if is_r else inv.get('Invoice No','')}</p>
       <p><strong>Date:</strong> {doc_date}</p>
+      {gst_details}
       {'<p><strong>Due Date:</strong> '+str(inv.get('Due Date',''))+'</p>' if not is_r else ''}
     </div>
     <div class="box"><h4>Student Details</h4>
