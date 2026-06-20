@@ -6,7 +6,7 @@ Robokidy Innovative Centre - Billing Software v5.0
 - Logo fix for .exe: embedded as base64 from exe folder
 """
 from __future__ import annotations
-import base64, io, sys, time, urllib.request, webbrowser
+import base64, io, sys, time, traceback, urllib.request, webbrowser
 from datetime import datetime
 from html import escape
 from pathlib import Path
@@ -25,6 +25,7 @@ DANGER    = "DC2626"
 SUCCESS   = "16A34A"
 BG_LIGHT  = "#F0F4FF"
 BG_WHITE  = "#FFFFFF"
+DEFAULT_GSTIN = "33AAOCR3798M1ZI"
 
 def _base_dir() -> Path:
     if getattr(sys,"frozen",False): return Path(sys.executable).parent
@@ -128,7 +129,7 @@ class ExcelStore:
         for k,v in [("Company Name","Robokidy Innovative Centre"),
                     ("Address","91/3 Ramachandra Nagar, Kallakurichi"),
                     ("Phone","+91 8300967241"),("Email","info@robokidy.com"),
-                    ("Website","www.robokidy.com"),("GSTIN","33AAOCR3798M1Z1"),
+                    ("Website","www.robokidy.com"),("GSTIN",DEFAULT_GSTIN),
                     ("Invoice Prefix","RKI-INV"),("Receipt Prefix","RKI-RCP")]:
             s.append([k,v])
         cp = wb["CoursePlans"]
@@ -165,6 +166,18 @@ class ExcelStore:
                     ws.cell(1,ws.max_column+1).value=h
                     current.append(h); changed=True
             self._sh(ws)
+        settings = wb["Settings"]
+        gst_row = None
+        for row in range(2, settings.max_row + 1):
+            if str(settings.cell(row, 1).value or "").strip() == "GSTIN":
+                gst_row = row
+                break
+        if gst_row is None:
+            settings.append(["GSTIN", DEFAULT_GSTIN])
+            changed = True
+        elif str(settings.cell(gst_row, 2).value or "").strip() != DEFAULT_GSTIN:
+            settings.cell(gst_row, 2).value = DEFAULT_GSTIN
+            changed = True
         if changed:
             safe_save(wb,self.path)
 
@@ -1709,5 +1722,26 @@ class BillingApp(tk.Tk):
             self.pi_sid["values"]=seen
         self._reload_plans()
 
+def show_unhandled_exception(exc_type, exc_value, exc_tb):
+    details = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+    log_path = BASE_DIR / "robokidy_error.log"
+    try:
+        log_path.write_text(details, encoding="utf-8")
+    except Exception:
+        pass
+    try:
+        messagebox.showerror(
+            "Unexpected Error",
+            f"Something went wrong. Please send this file for checking:\n{log_path}"
+        )
+    except Exception:
+        pass
+
+def main():
+    sys.excepthook = show_unhandled_exception
+    app = BillingApp()
+    app.report_callback_exception = show_unhandled_exception
+    app.mainloop()
+
 if __name__=="__main__":
-    app=BillingApp(); app.mainloop()
+    main()
