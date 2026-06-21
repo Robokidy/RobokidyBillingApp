@@ -895,7 +895,8 @@ class BillingApp(tk.Tk):
         self.store=ExcelStore(); self.configure(bg=BG_LIGHT)
         INVOICE_DIR.mkdir(exist_ok=True)
         self._course_values=list(COURSES)
-        self._slookup={}; self._plan_map={}
+        self._slookup={}
+        self._invoice_student_values=[]; self._plan_map={}
         self._build(); self.refresh_all()
 
     # ── Shell ──────────────────────────────────────────────────────────────────
@@ -1212,9 +1213,10 @@ class BillingApp(tk.Tk):
 
         tk.Label(form,text="Select Student *",bg=BG_WHITE,fg="#444",
                  font=("Segoe UI",9)).grid(row=0,column=0,sticky="w",padx=(10,4),pady=4)
-        self.i_stu=ttk.Combobox(form,width=34,state="readonly")
+        self.i_stu=ttk.Combobox(form,width=34,state="normal")
         self.i_stu.grid(row=0,column=1,columnspan=2,sticky="ew",padx=(0,10),pady=4)
         self.i_stu.bind("<<ComboboxSelected>>",self._fill_stu_inv)
+        self.i_stu.bind("<KeyRelease>",self._filter_invoice_students)
         self.i_idate=self._ff(form,"Invoice Date",0,3,val=datetime.now().strftime("%d-%m-%Y"))
         self.i_due  =self._ff(form,"Due Date",0,5)
         self.i_cr   =self._ff(form,"Course",1,0)
@@ -1289,12 +1291,23 @@ class BillingApp(tk.Tk):
         for c in self.inv_filters.values(): c.set("All")
         self._apply_inv_filter()
 
+
+    def _filter_invoice_students(self,_=None):
+        q=self.i_stu.get().strip().lower()
+        vals=getattr(self,"_invoice_student_values",[])
+        if q:
+            vals=[v for v in vals if q in v.lower()]
+        self.i_stu["values"]=vals
+
     def _fill_stu_inv(self,_=None):
         s=self._slookup.get(self.i_stu.get())
         if not s: return
         for e,k in [(self.i_cr,"Course"),(self.i_lv,"Level"),(self.i_ba,"Batch")]:
-            e.config(state="normal"); e.delete(0,tk.END); e.insert(0,s.get(k,""))
-        self._reload_plans(s.get("Course",""))
+            value=str(s.get(k,"") or "")
+            e.config(state="normal")
+            e.delete(0,tk.END)
+            e.insert(0,value)
+        self._reload_plans(str(s.get("Course","") or ""))
 
     def _reload_plans(self,course=""):
         plans=self.store.rows("CoursePlans")

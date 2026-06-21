@@ -1,0 +1,18 @@
+# Generated data — never commit these (they're per-installation user data)
+robokidy_billing_data.xlsx
+robokidy_billing_data*.xlsx
+robokidy_error.log
+robokidy_logo.png
+invoices/
+
+# PyInstaller build artifacts — regenerate locally, never commit
+build/
+dist/
+*.spec
+__pycache__/
+*.pyc
+
+# Editor / OS junk
+.vscode/
+.DS_Store
+Thumbs.db
