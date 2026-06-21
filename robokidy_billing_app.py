@@ -1292,12 +1292,32 @@ class BillingApp(tk.Tk):
         self._apply_inv_filter()
 
 
-    def _filter_invoice_students(self,_=None):
-        q=self.i_stu.get().strip().lower()
-        vals=getattr(self,"_invoice_student_values",[])
-        if q:
-            vals=[v for v in vals if q in v.lower()]
-        self.i_stu["values"]=vals
+    def _filter_invoice_students(self, event=None):
+
+        if event and event.keysym in (
+        "Up","Down","Left","Right",
+        "Return","Tab","Escape"
+    ):
+            return
+
+        query = self.i_stu.get().strip().lower()
+
+        if not query:
+            self.i_stu["values"] = self._invoice_student_values
+            return
+
+        filtered = [
+        item for item in self._invoice_student_values
+        if query in item.lower()
+    ]
+
+        self.i_stu["values"] = filtered
+
+        if filtered:
+            try:
+                self.i_stu.event_generate("<Down>")
+            except:
+                pass
 
     def _fill_stu_inv(self,_=None):
         s=self._slookup.get(self.i_stu.get())
@@ -1803,10 +1823,14 @@ class BillingApp(tk.Tk):
         pc=["Invoice No","Date","Student Name","Total Amount","Paid Amount","Balance","Due Date","Payment Status"]
         self._fill(self.rpt_tree, pending, pc)
 
-        self._slookup={
-            f"{s.get('Student ID')} — {s.get('Student Name')} ({s.get('Course','')})":s
-            for s in students}
-        if hasattr(self,"sco"): self.sco["values"]=self._course_values
+        self._slookup = {
+    f"{s.get('Student ID')} — {s.get('Student Name')} ({s.get('Course','')})": s
+    for s in students
+}
+
+        self._invoice_student_values = list(self._slookup.keys())
+        if hasattr(self,"sco"):
+            self.sco["values"]=self._course_values
         for attr in ["st_filters","inv_filters","pay_filters","plan_filters","rpt_filters"]:
             flt=getattr(self,attr,None)
             if flt and "Course" in flt:
@@ -1835,7 +1859,8 @@ class BillingApp(tk.Tk):
             dates=self._dates_for(invoices,"Date")
             self.rpt_filters["From"]["values"]=dates; self.rpt_filters["To"]["values"]=dates
             self._apply_report_filter()
-        if hasattr(self,"i_stu"): self.i_stu["values"]=list(self._slookup.keys())
+        if hasattr(self,"i_stu"):
+            self.i_stu["values"] = self._invoice_student_values
         if hasattr(self,"pi_inv"):
             self.pi_inv["values"]=[str(r.get("Invoice No","")) for r in invoices if r.get("Invoice No")]
         if hasattr(self,"pi_sid"):
